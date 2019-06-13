@@ -1,0 +1,80 @@
+#!/bin/bash
+
+genome=path/to/hg38.fa   # replace path/to with actual path to file
+dashr=path/to/dashr.v2.sncRNA.annotation.hg38.bed  # replace path/to with actual path to file (DASHR ncRNA database)
+index=path/to/star_index # replace path/to with actual path to folder
+cpu=8 # number of cores
+gtf_piR=path/to/piR38.gtf  # replace path/to with actual path to file (generated from piRbase hg38 coordinates)
+
+
+
+
+############################################
+#Generate ncRNA file for filtering
+
+grep -v "piRNA" $dashr > ncRNAs.bed
+
+bed_ncRNA=path/to/ncRNAs.bed   # replace path/to with actual path to file
+
+############################################
+
+
+
+
+for i in *.fastq
+	do
+
+base=$(basename $i .fastq)
+
+	mkdir $base
+	cd $base	
+	
+	
+echo "-->>>---Initiating STAR for $base---<<<---"
+echo ""
+	
+STAR --genomeDir $index \
+	--genomeLoad NoSharedMemory \
+	--runThreadN $cpu \
+	--readFilesIn $i \
+	--outSAMstrandField intronMotif \
+	--outFileNamePrefix $base.unfilt
+
+
+samtools sort $base.unfilt*.sam > $base.unfilt.bam
+
+
+
+############################################################################
+
+echo "filtering by size (24-34) $base"
+
+samtools view -h $base.unfilt.bam | awk 'length($10) > 23 || $1 ~ /^@/' | awk 'length($10) < 35 || $1 ~ /^@/' | samtools view -bS - > $base.lenFilt.bam
+
+
+
+
+samtools view -h $base.lenFilt.bam > $base.lenFilt.sam 
+
+##############################################################################
+
+echo "filtering ncRNAs $base"
+
+intersectBed -s -v -f 0.2 -abam $base.lenFilt.bam -b $bed_ncRNA > $base.lenFilt.ncFilt.bam
+
+samtools view -h $base.lenFilt.ncFilt.bam > $base.lenFilt.ncFilt.sam 
+
+
+#### counting reads in piRNAs ############
+
+htseq-count $base.lenFilt.sam $gtf_piR > $base.counts_pir.lenFilt.txt
+
+htseq-count $base.lenFilt.ncFilt.sam $gtf_piR > $base.counts_pir.lenFilt.ncFilt.txt
+
+echo ""
+	echo "---->>>----Finish $base----<<<-----"
+echo ""
+cd ..
+
+done
+
